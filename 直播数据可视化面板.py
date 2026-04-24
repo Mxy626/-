@@ -313,8 +313,10 @@ def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
         # 明细表
         fmt_df = df.copy()
         for col in fmt_df.columns:
-            if '率' in col:
-                fmt_df[col] = fmt_df[col].map(lambda x: f"{x:.2%}")
+            if '率' in col and pd.api.types.is_numeric_dtype(fmt_df[col]):
+                fmt_df[col] = fmt_df[col].map(
+                    lambda x: f"{x:.2%}" if pd.notna(x) else "N/A"
+                )
         fmt_df.to_excel(writer, sheet_name='明细数据', index=False)
 
         # 优质数据
@@ -441,8 +443,10 @@ with tab1:
 with tab2:
     disp_df = df_filtered.copy()
     for c in disp_df.columns:
-        if '率' in c:
-            disp_df[c] = disp_df[c].map(lambda x: f"{x:.2%}")
+        if '率' in c and pd.api.types.is_numeric_dtype(disp_df[c]):
+            disp_df[c] = disp_df[c].map(
+                lambda x: f"{x:.2%}" if pd.notna(x) else "N/A"
+            )
     st.dataframe(disp_df, use_container_width=True, height=600)
 
 # 行业对标
