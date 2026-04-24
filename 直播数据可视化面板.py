@@ -45,42 +45,42 @@ METRIC_STANDARD = {
 # 通用字段映射（抖音/快手字段相同，合并为一份）
 FIELD_MAPPING = {
     "video": {
-        "video_id": ["视频ID", "item_id", "视频id", "作品ID", "作品id"],
-        "title": ["视频标题", "标题", "作品标题"],
-        "publish_time": ["发布时间", "发布日期"],
-        "total_views": ["播放次数", "总播放量", "播放量"],
-        "valid_views": ["有效播放", "有效播放次数", "有效播放量"],
-        "play_5s": ["5秒完播人数", "5秒播放人数", "前5秒完播人数"],
-        "play_complete": ["完播人数", "完整播放人数", "全程完播人数"],
-        "likes": ["点赞数", "点赞次数", "点赞"],
-        "comments": ["评论数", "评论次数", "评论"],
-        "shares": ["转发数", "分享数", "转发次数", "分享次数"],
-        "favorites": ["收藏数", "收藏次数", "收藏"],
-        "new_fans": ["新增粉丝", "新增关注", "新增粉丝数", "关注新增"],
+        "video_id": ["视频ID", "item_id", "视频id", "作品ID", "作品id", "video_id"],
+        "title": ["视频标题", "标题", "作品标题", "title"],
+        "publish_time": ["发布时间", "发布日期", "publish_time"],
+        "total_views": ["播放次数", "总播放量", "播放量", "total_views"],
+        "valid_views": ["有效播放", "有效播放次数", "有效播放量", "valid_views"],
+        "play_5s": ["5秒完播人数", "5秒播放人数", "前5秒完播人数", "play_5s"],
+        "play_complete": ["完播人数", "完整播放人数", "全程完播人数", "play_complete"],
+        "likes": ["点赞数", "点赞次数", "点赞", "likes"],
+        "comments": ["评论数", "评论次数", "评论", "comments"],
+        "shares": ["转发数", "分享数", "转发次数", "分享次数", "shares"],
+        "favorites": ["收藏数", "收藏次数", "收藏", "favorites"],
+        "new_fans": ["新增粉丝", "新增关注", "新增粉丝数", "关注新增", "new_fans"],
     },
     "live_entertainment": {
-        "live_id": ["直播ID", "场次ID"],
-        "start_time": ["开播时间", "直播时间"],
-        "total_viewers": ["观看人数", "累计观看人数"],
-        "avg_stay_seconds": ["平均停留时长", "人均停留时长(秒)"],
-        "danmu_count": ["弹幕数", "评论数"],
-        "pay_users": ["付费人数", "打赏用户数"],
-        "total_gift_amount": ["打赏金额", "礼物收入"],
-        "fans_contribution": ["粉丝打赏金额", "粉丝贡献"],
-        "new_fans": ["新增粉丝", "新增关注"],
+        "live_id": ["直播ID", "场次ID", "live_id"],
+        "start_time": ["开播时间", "直播时间", "start_time"],
+        "total_viewers": ["观看人数", "累计观看人数", "total_viewers"],
+        "avg_stay_seconds": ["平均停留时长", "人均停留时长(秒)", "avg_stay_seconds"],
+        "danmu_count": ["弹幕数", "评论数", "danmu_count"],
+        "pay_users": ["付费人数", "打赏用户数", "pay_users"],
+        "total_gift_amount": ["打赏金额", "礼物收入", "total_gift_amount"],
+        "fans_contribution": ["粉丝打赏金额", "粉丝贡献", "fans_contribution"],
+        "new_fans": ["新增粉丝", "新增关注", "new_fans"],
     },
     "live_ecommerce": {
-        "live_id": ["直播ID", "场次ID"],
-        "start_time": ["开播时间", "直播时间"],
-        "total_viewers": ["观看人数", "累计观看人数"],
-        "product_click": ["商品点击数", "商品点击人数"],
-        "order_count": ["下单人数", "下单量"],
-        "pay_count": ["支付人数", "支付订单数"],
-        "gmv": ["GMV", "销售额", "成交金额"],
-        "refund_amount": ["退款金额", "退款GMV"],
-        "cost_total": ["投放成本", "推广花费", "总成本"],
-        "fans_pay_count": ["粉丝支付人数", "粉丝订单数"],
-        "new_fans": ["新增粉丝", "新增关注"],
+        "live_id": ["直播ID", "场次ID", "live_id"],
+        "start_time": ["开播时间", "直播时间", "start_time"],
+        "total_viewers": ["观看人数", "累计观看人数", "total_viewers"],
+        "product_click": ["商品点击数", "商品点击人数", "product_click"],
+        "order_count": ["下单人数", "下单量", "order_count"],
+        "pay_count": ["支付人数", "支付订单数", "pay_count"],
+        "gmv": ["GMV", "销售额", "成交金额", "gmv"],
+        "refund_amount": ["退款金额", "退款GMV", "refund_amount"],
+        "cost_total": ["投放成本", "推广花费", "总成本", "cost_total"],
+        "fans_pay_count": ["粉丝支付人数", "粉丝订单数", "fans_pay_count"],
+        "new_fans": ["新增粉丝", "新增关注", "new_fans"],
     },
 }
 
@@ -102,39 +102,55 @@ FILTER_COLUMNS = {
 }
 
 
-# ===================== 核心函数 =====================
-@st.cache_data(ttl=3600)
+# ===================== 核心函数（去掉缓存装饰器，方便调试） =====================
 def load_and_clean_data(uploaded_file, platform: str, mode: str) -> tuple:
     """加载并清洗数据，自动匹配字段名"""
     try:
+        # ---------- 读取文件 ----------
         if uploaded_file.name.endswith(('.xlsx', '.xls')):
             df = pd.read_excel(uploaded_file)
         else:
-            for enc in ['utf-8', 'gbk', 'gb2312', 'utf-8-sig']:
+            raw_bytes = uploaded_file.getvalue()
+            # 剥离 UTF-8 BOM
+            if raw_bytes.startswith(b'\xef\xbb\xbf'):
+                raw_bytes = raw_bytes[3:]
+            for enc in ['utf-8', 'utf-8-sig', 'gbk', 'gb2312']:
                 try:
-                    df = pd.read_csv(uploaded_file, encoding=enc)
+                    df = pd.read_csv(BytesIO(raw_bytes), encoding=enc)
                     break
                 except UnicodeDecodeError:
                     continue
             else:
                 return None, "CSV 文件编码不支持，请保存为 UTF-8 或 GBK 格式"
 
+        # ---------- 清理列名 ----------
+        df.columns = [str(c).strip().replace('\ufeff', '') for c in df.columns]
+
+        # ---------- 调试：打印读取到的列名 ----------
+        st.session_state['_debug_cols'] = list(df.columns)
+
+        # ---------- 字段映射 ----------
         mapping = FIELD_MAPPING[mode]
         rename_dict, missing_fields = {}, []
 
         for standard_field, possible_names in mapping.items():
             for col in df.columns:
-                if col.strip() in possible_names:
+                if col in possible_names:
                     rename_dict[col] = standard_field
                     break
             else:
                 missing_fields.append(standard_field)
 
         if missing_fields:
-            return None, f"缺少必填字段：{missing_fields}"
+            return None, (
+                f"缺少必填字段：{missing_fields}。"
+                f"实际列名：{list(df.columns)}。"
+                f"期望字段：{list(mapping.keys())}"
+            )
 
         df = df.rename(columns=rename_dict)
 
+        # ---------- 数据清洗 ----------
         time_col = 'publish_time' if mode == "video" else 'start_time'
         drop_col = 'valid_views' if mode == "video" else 'total_viewers'
 
@@ -317,6 +333,10 @@ def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
 # ===================== 页面主体 =====================
 st.title("📊 直播数据可视化面板")
 st.divider()
+
+# 调试信息展示
+if '_debug_cols' in st.session_state:
+    st.warning(f"上次读取的 CSV 列名：{st.session_state['_debug_cols']}")
 
 with st.sidebar:
     st.header("⚙️ 面板配置")
