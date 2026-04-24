@@ -50,7 +50,7 @@ FIELD_MAPPING = {
         "publish_time": ["发布时间", "发布日期"],
         "total_views": ["播放次数", "总播放量", "播放量"],
         "valid_views": ["有效播放", "有效播放次数", "有效播放量"],
-        "play_5s": ["5秒完播人数", "5秒播放人数", "前5秒完播人数", "5秒播放人数"],
+        "play_5s": ["5秒完播人数", "5秒播放人数", "前5秒完播人数"],
         "play_complete": ["完播人数", "完整播放人数", "全程完播人数"],
         "likes": ["点赞数", "点赞次数", "点赞"],
         "comments": ["评论数", "评论次数", "评论"],
@@ -101,6 +101,7 @@ FILTER_COLUMNS = {
     "live_ecommerce": ["ROI_评级", "支付转化率_评级"],
 }
 
+
 # ===================== 核心函数 =====================
 @st.cache_data(ttl=3600)
 def load_and_clean_data(uploaded_file, platform: str, mode: str) -> tuple:
@@ -136,7 +137,7 @@ def load_and_clean_data(uploaded_file, platform: str, mode: str) -> tuple:
 
         time_col = 'publish_time' if mode == "video" else 'start_time'
         drop_col = 'valid_views' if mode == "video" else 'total_viewers'
-        
+
         df = df.dropna(subset=[drop_col])
         df = df[df[drop_col] > 0]
 
@@ -149,9 +150,11 @@ def load_and_clean_data(uploaded_file, platform: str, mode: str) -> tuple:
     except Exception as e:
         return None, f"读取失败：{str(e)}"
 
+
 def _is_higher_better(metric: str) -> bool:
     """判断指标是否越高越好（退款率越低越好）"""
     return metric != "退款率"
+
 
 def calculate_metrics(df: pd.DataFrame, mode: str) -> pd.DataFrame:
     """计算所有派生指标及评级"""
@@ -203,6 +206,7 @@ def calculate_metrics(df: pd.DataFrame, mode: str) -> pd.DataFrame:
 
     return df
 
+
 def get_summary_data(df: pd.DataFrame, mode: str) -> dict:
     """生成汇总指标"""
     cfg = METRIC_STANDARD[mode]
@@ -223,5 +227,243 @@ def get_summary_data(df: pd.DataFrame, mode: str) -> dict:
     elif mode == "live_entertainment":
         total = df['total_viewers'].sum()
         total_gift = df['total_gift_amount'].sum()
+        return {
+            "统计直播场次": len(df),
+            "累计总观看人数": total,
+            "累计打赏总金额": total_gift,
+            "累计新增粉丝": df['new_fans'].sum(),
+            "场均平均停留时长": df['avg_stay_seconds'].mean(),
+            "场均付费率": df['pay_users'].sum() / total,
+            "场均粉丝贡献占比": df['fans_contribution'].sum() / total_gift,
+        }
 
-...(truncated)...
+    else:  # live_ecommerce
+        total = df['total_viewers'].sum()
+        total_gmv = df['gmv'].sum()
+        total_pay = df['pay_count'].sum()
+        total_cost = df['cost_total'].sum()
+        return {
+            "统计直播场次": len(df),
+            "累计总观看人数": total,
+            "累计总GMV": total_gmv,
+            "累计支付订单数": total_pay,
+            "累计新增粉丝": df['new_fans'].sum() if 'new_fans' in df.columns else 0,
+            "平均商品点击率": df['product_click'].sum() / total,
+            "平均支付转化率": total_pay / df['order_count'].sum(),
+            "平均客单价": total_gmv / total_pay,
+            "平均ROI": total_gmv / total_cost,
+            "平均退款率": df['refund_amount'].sum() / total_gmv,
+        }
+
+
+def _format_value(val: float, name: str) -> str:
+    """格式化指标显示值"""
+    if '率' in name and name != "平均ROI":
+        return f"{val:.2%}"
+    elif '时长' in name:
+        return f"{val:.1f}秒"
+    elif any(k in name for k in ['金额', 'GMV', '客单价']):
+        return f"¥{val:,.2f}"
+    elif 'ROI' in name:
+        return f"{val:.2f}倍"
+    else:
+        return f"{val:,.0f}"
+
+
+def _get_delta(val: float, name: str, cfg: dict) -> str:
+    """生成指标评级标签"""
+    key = name.replace("平均", "").replace("场均", "")
+    if key not in cfg:
+        return ""
+    standard = cfg[key]
+    if _is_higher_better(key):
+        return "优秀✅" if val >= standard['优秀'] else "合格⚠️" if val >= standard['合格'] else "待优化❌"
+    else:
+        return "优秀✅" if val <= standard['优秀'] else "合格⚠️" if val <= standard['合格'] else "待优化❌"
+
+
+def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
+    """导出 Excel 报表"""
+    output = BytesIO()
+    standard = METRIC_STANDARD[mode]
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 汇总表
+        summary_df = pd.DataFrame.from_dict(summary, orient='index', columns=['数值'])
+        for idx in summary_df.index:
+            summary_df.loc[idx, '数值'] = _format_value(float(summary_df.loc[idx, '数值']), idx)
+        summary_df.to_excel(writer, sheet_name='整体汇总')
+
+        # 明细表
+        fmt_df = df.copy()
+        for col in fmt_df.columns:
+            if '率' in col:
+                fmt_df[col] = fmt_df[col].map(lambda x: f"{x:.2%}")
+        fmt_df.to_excel(writer, sheet_name='明细数据', index=False)
+
+        # 优质数据
+        filter_cols = FILTER_COLUMNS[mode]
+        if all(c in fmt_df.columns for c in filter_cols):
+            hot_df = fmt_df[
+                (fmt_df[filter_cols[0]] != '不合格') &
+                (fmt_df[filter_cols[1]] != '不合格')
+            ]
+            hot_df.to_excel(writer, sheet_name='优质数据明细')
+
+    output.seek(0)
+    return output
+
+
+# ===================== 页面主体 =====================
+st.title("📊 直播数据可视化面板")
+st.divider()
+
+with st.sidebar:
+    st.header("⚙️ 面板配置")
+    st.divider()
+    platform = st.radio(
+        "选择平台",
+        ["douyin", "kuaishou"],
+        format_func=lambda x: PLATFORM_NAME[x],
+        index=0
+    )
+    mode = st.radio(
+        "选择数据模式",
+        ["video", "live_entertainment", "live_ecommerce"],
+        format_func=lambda x: MODE_NAME[x],
+        index=0
+    )
+    st.divider()
+    uploaded_file = st.file_uploader("上传后台Excel/CSV", type=["xlsx", "xls", "csv"])
+    st.divider()
+    filter_rating = st.multiselect(
+        "按评级筛选",
+        ["优秀", "合格", "不合格"],
+        default=["优秀", "合格", "不合格"]
+    )
+
+# 空状态提示
+if uploaded_file is None:
+    st.info("👈 左侧上传抖音/快手导出数据，自动生成可视化报表")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.subheader("📹 短视频分析")
+        st.write("完播/互动/转粉率自动计算｜爆款识别｜行业对标")
+    with c2:
+        st.subheader("🎤 娱乐直播分析")
+        st.write("停留/付费/打赏/粉丝贡献｜直播质量评估")
+    with c3:
+        st.subheader("🛒 带货直播分析")
+        st.write("点击率/转化率/ROI/GMV/退款率全链路")
+    st.stop()
+
+# 数据处理
+with st.spinner("数据处理中..."):
+    df, msg = load_and_clean_data(uploaded_file, platform, mode)
+
+if df is None:
+    st.error(msg)
+    st.stop()
+
+df_calc = calculate_metrics(df, mode)
+summary = get_summary_data(df_calc, mode)
+standard = METRIC_STANDARD[mode]
+
+# 筛选
+rating_cols = [c for c in df_calc.columns if "_评级" in c]
+if rating_cols:
+    df_filtered = df_calc[df_calc[rating_cols[0]].isin(filter_rating)]
+else:
+    df_filtered = df_calc
+
+st.success(msg)
+st.divider()
+st.subheader("📈 核心KPI概览")
+
+kpi_cols = st.columns(len(summary))
+for i, (kpi_name, kpi_val) in enumerate(summary.items()):
+    with kpi_cols[i]:
+        disp = _format_value(float(kpi_val), kpi_name)
+        delta = _get_delta(float(kpi_val), kpi_name, standard)
+        st.metric(label=kpi_name, value=disp, delta=delta)
+
+st.divider()
+tab1, tab2, tab3, tab4 = st.tabs(["📊趋势分析", "📋明细数据", "🎯行业对标", "📥报表导出"])
+
+time_col = "publish_time" if mode == "video" else "start_time"
+
+# 趋势分析
+with tab1:
+    if time_col in df_filtered.columns:
+        opts = [m for m in standard.keys() if m in df_filtered.columns]
+        default_sel = opts[:2] if len(opts) >= 2 else opts
+        sel = st.multiselect("选择指标", opts, default=default_sel)
+        if sel:
+            fig = go.Figure()
+            for m in sel:
+                fig.add_trace(go.Scatter(
+                    x=df_filtered[time_col],
+                    y=df_filtered[m],
+                    mode="lines+markers",
+                    name=m
+                ))
+                if m in standard:
+                    fig.add_hline(
+                        y=standard[m]["合格"],
+                        line_dash="dash",
+                        line_color="gray",
+                        annotation_text=f"{m} 合格线"
+                    )
+            fig.update_layout(height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+# 明细数据
+with tab2:
+    disp_df = df_filtered.copy()
+    for c in disp_df.columns:
+        if '率' in c:
+            disp_df[c] = disp_df[c].map(lambda x: f"{x:.2%}")
+    st.dataframe(disp_df, use_container_width=True, height=600)
+
+# 行业对标
+with tab3:
+    compare = []
+    for m, cfg in standard.items():
+        val_key_avg = f"平均{m}"
+        val_key_场 = f"场均{m}"
+        val = summary.get(val_key_avg) or summary.get(val_key_场)
+        if val is None:
+            continue
+        res = "优秀" if val >= cfg["优秀"] else "合格" if val >= cfg["合格"] else "待优化"
+        compare.append({
+            "指标": m,
+            "自身": f"{val:.2%}" if '率' in m or 'ROI' in m else (
+                f"¥{val:.2f}" if any(k in m for k in ['金额', '客单价']) else (
+                    f"{val:.1f}秒" if '时长' in m else f"{val:.2f}"
+                )
+            ),
+            "合格线": f"{cfg['合格']:.2%}" if '率' not in m else (
+                f"¥{cfg['合格']:.2f}" if '金额' in m else f"{cfg['合格']}"
+            ),
+            "优秀线": f"{cfg['优秀']:.2%}" if '率' not in m else (
+                f"¥{cfg['优秀']:.2f}" if '金额' in m else f"{cfg['优秀']}"
+            ),
+            "评级": res,
+        })
+    if compare:
+        st.dataframe(pd.DataFrame(compare), use_container_width=True, hide_index=True)
+
+# 报表导出
+with tab4:
+    st.write("一键导出完整Excel报表")
+    excel_file = export_excel(df_calc, summary, mode)
+    st.download_button(
+        label="📥 下载Excel报表",
+        data=excel_file,
+        file_name=f"令宇阳_直播数据报表_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+# ===================== 底部版权 =====================
+st.divider()
+st.caption("© 令宇阳 原创 · 直播数据可视化分析系统")
