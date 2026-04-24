@@ -304,11 +304,12 @@ def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
     standard = METRIC_STANDARD[mode]
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # 汇总表
+        # 汇总表（至少保证有一个 sheet）
         summary_df = pd.DataFrame.from_dict(summary, orient='index', columns=['数值'])
         for idx in summary_df.index:
             summary_df.loc[idx, '数值'] = _format_value(float(summary_df.loc[idx, '数值']), idx)
-        summary_df.to_excel(writer, sheet_name='整体汇总')
+        if len(summary_df) > 0:
+            summary_df.to_excel(writer, sheet_name='整体汇总')
 
         # 明细表
         fmt_df = df.copy()
@@ -317,7 +318,8 @@ def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
                 fmt_df[col] = fmt_df[col].map(
                     lambda x: f"{x:.2%}" if pd.notna(x) else "N/A"
                 )
-        fmt_df.to_excel(writer, sheet_name='明细数据', index=False)
+        if len(fmt_df) > 0:
+            fmt_df.to_excel(writer, sheet_name='明细数据', index=False)
 
         # 优质数据
         filter_cols = FILTER_COLUMNS[mode]
@@ -326,7 +328,14 @@ def export_excel(df: pd.DataFrame, summary: dict, mode: str) -> BytesIO:
                 (fmt_df[filter_cols[0]] != '不合格') &
                 (fmt_df[filter_cols[1]] != '不合格')
             ]
-            hot_df.to_excel(writer, sheet_name='优质数据明细')
+            if len(hot_df) > 0:
+                hot_df.to_excel(writer, sheet_name='优质数据明细')
+
+        # 兜底：如果整个 DataFrame 为空，写入一个提示 sheet
+        if len(summary_df) == 0 and len(fmt_df) == 0:
+            pd.DataFrame({"提示": ["没有可导出的数据"]}).to_excel(
+                writer, sheet_name='无数据', index=False
+            )
 
     output.seek(0)
     return output
